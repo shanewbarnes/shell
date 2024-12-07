@@ -16,6 +16,7 @@ void sh_loop(void);
 int sh_exit(char **args);
 char *sh_read_line(void);
 char **sh_split_line(char *line);
+char **sh_split_cmd(char *cmd);
 int sh_execute(char **args);
 
 int main(int argc, char **argv)
@@ -28,17 +29,25 @@ int main(int argc, char **argv)
 void sh_loop(void)
 {
 	char *line;
+	char **cmds;
 	char **args;
 	int status;
 
 	do {
 		printf("$ ");
+
 		line = sh_read_line();
-		args = sh_split_line(line);
-		status = sh_execute(args);
+		cmds = sh_split_line();
+
+		do {
+			args = sh_split_cmd(cmd);
+			status = sh_execute(args);
+
+			free(args);
+		} while (status);
 
 		free(line);
-		free(args);
+		free(cmds);
 	} while (status);
 }
 
@@ -62,6 +71,32 @@ char *sh_read_line(void)
 char **sh_split_line(char *line)
 {
 	int bufsize = SH_TOK_BUFSIZE, position = 0;
+	char **cmds = malloc(bufsize * sizeof(char *));
+	char *cmd;
+
+	if (!cmds) {
+		fprintf(stderr, "sh: allocation error\n");
+		exit(EXIT_FAILURE);
+	}
+
+	int j = 0;
+	for (int i = 0; line[i] != '\0'; i++) {
+		if (line[i] == '>') {
+			
+		} else if (line[i] == '<') {
+
+		} else if (line[i] == '|') {
+
+		}
+
+		strncpy(cmd, line + j, i - j);
+		cmds[i] = cmd;
+	}
+}
+
+char **sh_split_cmd(char *cmd)
+{
+	int bufsize = SH_TOK_BUFSIZE, position = 0;
 	char **tokens = malloc(bufsize * sizeof(char *));
 	char *token;
 
@@ -70,7 +105,7 @@ char **sh_split_line(char *line)
 		exit(EXIT_FAILURE);
 	}
 
-	token = strtok(line, SH_TOK_DELIM);
+	token = strtok(cmd, SH_TOK_DELIM);
 	while (token != NULL) {
 		tokens[position] = token;
 		position++;
