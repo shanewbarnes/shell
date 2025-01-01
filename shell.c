@@ -7,7 +7,18 @@
 #define SH_READ_LINE_BUFSIZE 1024
 
 #define SH_TOK_BUFSIZE 64
-#define SH_TOK_DELIM " \t\r\n\a"
+#define SH_TOK_LINE_DELIM "|"
+#define SH_TOK_CMD_DELIM " \t\r\n\a"
+
+struct fds {
+	int oldfd;
+	int newfd;
+};
+
+struct dups {
+	struct fds indupfds;
+	struct fds outdupfds;
+};
 
 /*
  * Function Declarations
@@ -15,8 +26,9 @@
 void sh_loop(void);
 int sh_exit(char **args);
 char *sh_read_line(void);
-char **sh_split_line(char *line);
-int sh_execute(char **args);
+char **sh_split(char *string, char *delim);
+int sh_execute(char **args, struct dups dups);
+int sh_pipeline(char **cmds); 
 
 int main(int argc, char **argv)
 {
@@ -28,18 +40,81 @@ int main(int argc, char **argv)
 void sh_loop(void)
 {
 	char *line;
-	char **args;
+	char **cmds;
 	int status;
 
 	do {
 		printf("$ ");
 		line = sh_read_line();
-		args = sh_split_line(line);
-		status = sh_execute(args);
+		cmds = sh_split(line, SH_TOK_LINE_DELIM);
 
+		status = sh_pipeline(cmds);
+
+		free(cmds);
 		free(line);
-		free(args);
 	} while (status);
+}
+
+int sh_pipeline(char **cmds) 
+{
+	struct dups dups;
+	int status;
+	char **args;
+	int pipe_fds[2];
+
+	if (cmds[1] == NULL) {
+		args = sh_split(cmds[0], SH_TOK_CMD_DELIM);
+
+		dups.indupfds.oldfd, dups.indupfds.newfd = 0;
+		dups.outdupfds.oldfd, dups.outdupfds.newfd = 1;
+
+		status = sh_execute(args, dups);
+
+		free(args);
+
+		return status;
+	}
+
+	dups.indupfds.oldfd, dups.indupfds.newfd = 0;
+
+	args = sh_split(cmds[0], SH_TOK_CMD_DELIM);
+
+	for (int i = 1; cmds[i] != NULL; i++) {
+
+		pipe(pipe_fds);
+
+		dups.outdupfds.oldfd = pipe_fds[1];
+		dups.outdupfds.newfd = 1; 			
+
+		status = sh_execute(args, dups);
+		
+		args = NULL;
+
+		if (!status) {
+			free(args);
+			return status;
+		}
+
+		args = sh_split(cmds[i], SH_TOK_CMD_DELIM);
+
+		dups.indupfds.oldfd = pipe_fds[0];
+		dups.indupfds.newfd = 0;
+		
+		if (cmds[i + 1] != NULL) {
+			close(pipe_fds[0]);
+		}
+		close(pipe_fds[1]);
+	}
+
+	dups.outdupfds.oldfd, dups.outdupfds.newfd = 1;
+
+	status = sh_execute(args, dups);
+
+	close(pipe_fds[0]);
+
+	free(args);
+
+	return status;
 }
 
 char *sh_read_line(void)
@@ -59,7 +134,7 @@ char *sh_read_line(void)
 	return line;
 }
 
-char **sh_split_line(char *line)
+char **sh_split(char *string, char *delim)
 {
 	int bufsize = SH_TOK_BUFSIZE, position = 0;
 	char **tokens = malloc(bufsize * sizeof(char *));
@@ -70,7 +145,7 @@ char **sh_split_line(char *line)
 		exit(EXIT_FAILURE);
 	}
 
-	token = strtok(line, SH_TOK_DELIM);
+	token = strtok(string, delim);
 	while (token != NULL) {
 		tokens[position] = token;
 		position++;
@@ -84,21 +159,26 @@ char **sh_split_line(char *line)
 			}
 		}
 
-		token = strtok(NULL, SH_TOK_DELIM);
+		token = strtok(NULL, delim);
 	}
 
 	tokens[position] = NULL;
 	return tokens;
 }
 
-int sh_launch(char **args)
+int sh_launch(char **args, struct dups dups)
 {
 	pid_t pid, wpid;
 	int status;
 
 	pid = fork();
 	if (pid == 0) {
+
 		// Child process
+
+		dup2(dups.indupfds.oldfd, dups.indupfds.newfd);
+		dup2(dups.outdupfds.oldfd, dups.outdupfds.newfd);
+
 		if (execvp(args[0], args) == -1) {
 			perror("sh");
 		}
@@ -161,7 +241,7 @@ int sh_exit(char **args)
 	return 0;
 }
 
-int sh_execute(char **args) 
+int sh_execute(char **args, struct dups dups) 
 {
 	int i;
 
@@ -176,5 +256,5 @@ int sh_execute(char **args)
 		}
 	}
 	
-	return sh_launch(args);
+	return sh_launch(args, dups);
 }
