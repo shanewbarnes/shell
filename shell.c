@@ -63,6 +63,7 @@ int sh_pipeline(char **cmds)
 	int pipe_fds[2];
 
 	if (cmds[1] == NULL) {
+
 		args = sh_split(cmds[0], SH_TOK_CMD_DELIM);
 
 		dups.indupfds.oldfd, dups.indupfds.newfd = 0;
@@ -100,7 +101,7 @@ int sh_pipeline(char **cmds)
 		dups.indupfds.oldfd = pipe_fds[0];
 		dups.indupfds.newfd = 0;
 		
-		if (cmds[i + 1] != NULL) {
+		if (cmds[i + 2] != NULL) {
 			close(pipe_fds[0]);
 		}
 		close(pipe_fds[1]);
