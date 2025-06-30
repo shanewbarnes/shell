@@ -147,14 +147,14 @@ int sh_piping(char **cmds)
 	dups.in_dup_fds.new_fd = STDIN_FILENO;
 	dups.in_dup_fds.old_fd = STDIN_FILENO;
 
+	cmd = sh_split(cmds[0], SH_TOK_REDIRECT_DELIM);
+
 	for (int i = 1; cmds[i] != NULL; i++) {
 
 		pipe(pipe_fds);
 
 		dups.out_dup_fds.old_fd = pipe_fds[1];
 		dups.out_dup_fds.new_fd = STDOUT_FILENO; 			
-
-		cmd = sh_split(cmds[0], SH_TOK_REDIRECT_DELIM);
 
 		status = sh_redirect(cmd, dups);
 		
