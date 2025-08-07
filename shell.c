@@ -3,21 +3,23 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <ctype.h>
 
 #define SH_READ_LINE_BUFSIZE 1024
 
 #define SH_TOK_BUFSIZE 64
-#define SH_TOK_LINE_DELIM "|"
+#define SH_TOK_REDIRECT_DELIM ">"
+#define SH_TOK_PIPING_DELIM "|"
 #define SH_TOK_CMD_DELIM " \t\r\n\a"
 
 struct fds {
-	int oldfd;
-	int newfd;
+	int old_fd;
+	int new_fd;
 };
 
 struct dups {
-	struct fds indupfds;
-	struct fds outdupfds;
+	struct fds in_dup_fds;
+	struct fds out_dup_fds;
 };
 
 /*
@@ -28,10 +30,13 @@ int sh_exit(char **args);
 char *sh_read_line(void);
 char **sh_split(char *string, char *delim);
 int sh_execute(char **args, struct dups dups);
-int sh_pipeline(char **cmds); 
+int sh_redirect(char **cmd, struct dups dups);
+int sh_piping(char **cmds); 
+char *sh_trim(char *string);
 
 int main(int argc, char **argv)
 {
+
 	sh_loop();
 
 	return EXIT_SUCCESS;
@@ -47,61 +52,125 @@ void sh_loop(void)
 		printf("$ ");
 
 		line = sh_read_line();
-		cmds = sh_split(line, SH_TOK_LINE_DELIM);
+		cmds = sh_split(line, SH_TOK_PIPING_DELIM);
 
-		status = sh_pipeline(cmds);
+		status = sh_piping(cmds);
 
 		free(cmds);
+		cmds = NULL;
 		free(line);
-
+		line = NULL;
 	} while (status);
 }
 
-int sh_pipeline(char **cmds) 
+int sh_redirect(char **cmd, struct dups dups) 
+{
+	int status, out_fd;
+	char **args;
+	char *trim_string;
+	
+	args = sh_split(cmd[0], SH_TOK_CMD_DELIM);
+	
+	if (cmd[1] != NULL) {
+
+		trim_string = sh_trim(cmd[1]);
+
+		out_fd = fileno(fopen(trim_string, "w"));
+
+		free(trim_string);
+		trim_string = NULL;
+
+		dups.out_dup_fds.old_fd = out_fd;
+
+		status = sh_execute(args, dups);
+
+		close(out_fd);
+
+	} else {
+		status = sh_execute(args, dups);
+	}
+
+	return status;
+}
+
+char *sh_trim(char *string)
+{
+	int i, j, length = strlen(string);
+	char *trim_string = malloc((length + 1) * sizeof(char));
+
+	i = 0;
+	while (isspace(string[i])) {
+		i++;
+	}
+
+	j = 0;
+	while (string[i] != '\0') {
+		trim_string[j] = string[i];
+		i++, j++;
+	}
+
+	j--;
+
+	while (isspace(trim_string[j])) {
+		j--;
+	}
+
+	trim_string[j + 1] = '\0';
+
+	return trim_string;
+}
+
+int sh_piping(char **cmds) 
 {
 	struct dups dups;
 	int status;
-	char **args;
+	char **cmd;
 	int pipe_fds[2];
 
 	if (cmds[1] == NULL) {
 
-		args = sh_split(cmds[0], SH_TOK_CMD_DELIM);
+		cmd = sh_split(cmds[0], SH_TOK_REDIRECT_DELIM);
 
-		dups.indupfds.oldfd, dups.indupfds.newfd = 0;
-		dups.outdupfds.oldfd, dups.outdupfds.newfd = 1;
+		dups.in_dup_fds.new_fd = STDIN_FILENO;
+		dups.in_dup_fds.old_fd = STDIN_FILENO;
+		
+		dups.out_dup_fds.old_fd = STDOUT_FILENO; 
+		dups.out_dup_fds.new_fd = STDOUT_FILENO;
 
-		status = sh_execute(args, dups);
+		status = sh_redirect(cmd, dups);
 
-		free(args);
+		free(cmd);
+		cmd = NULL;
 
 		return status;
 	}
 
-	dups.indupfds.oldfd, dups.indupfds.newfd = 0;
+	dups.in_dup_fds.new_fd = STDIN_FILENO;
+	dups.in_dup_fds.old_fd = STDIN_FILENO;
 
-	args = sh_split(cmds[0], SH_TOK_CMD_DELIM);
+	cmd = sh_split(cmds[0], SH_TOK_REDIRECT_DELIM);
 
 	for (int i = 1; cmds[i] != NULL; i++) {
 
 		pipe(pipe_fds);
 
-		dups.outdupfds.oldfd = pipe_fds[1];
-		dups.outdupfds.newfd = 1; 			
+		dups.out_dup_fds.old_fd = pipe_fds[1];
+		dups.out_dup_fds.new_fd = STDOUT_FILENO; 			
 
-		status = sh_execute(args, dups);
+		status = sh_redirect(cmd, dups);
 		
-		args = NULL;
+		cmd = NULL;
 
 		if (!status) {
-			free(args);
+			free(cmd);
+			cmd = NULL;
 			return status;
 		}
 
-		args = sh_split(cmds[i], SH_TOK_CMD_DELIM);
+		cmd = sh_split(cmds[i], SH_TOK_REDIRECT_DELIM);
 
-		dups.indupfds.oldfd = pipe_fds[0];
-		dups.indupfds.newfd = 0;
+		dups.in_dup_fds.old_fd = pipe_fds[0];
+		dups.in_dup_fds.new_fd = STDIN_FILENO;
 		
 		if (cmds[i + 2] != NULL) {
 			close(pipe_fds[0]);
@@ -109,13 +178,15 @@ int sh_pipeline(char **cmds)
 		close(pipe_fds[1]);
 	}
 
-	dups.outdupfds.oldfd, dups.outdupfds.newfd = 1;
+	dups.out_dup_fds.old_fd = STDOUT_FILENO;
+	dups.out_dup_fds.new_fd = STDOUT_FILENO;
 
-	status = sh_execute(args, dups);
+	status = sh_redirect(cmd, dups);
 
 	close(pipe_fds[0]);
 
-	free(args);
+	free(cmd);
+	cmd = NULL;
 
 	return status;
 }
@@ -206,8 +277,8 @@ int sh_launch(char **args, struct dups dups)
 
 		// Child process
 
-		dup2(dups.indupfds.oldfd, dups.indupfds.newfd);
-		dup2(dups.outdupfds.oldfd, dups.outdupfds.newfd);
+		dup2(dups.in_dup_fds.old_fd, dups.in_dup_fds.new_fd);
+		dup2(dups.out_dup_fds.old_fd, dups.out_dup_fds.new_fd);
 
 		if (execvp(args[0], args) == -1) {
 			perror("sh");
