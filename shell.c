@@ -208,7 +208,7 @@ char *sh_read_line(void)
 	return line;
 }
 
-char **sh_split_cmd(char *string, char *delim)
+char **sh_split(char *string, char *delim)
 {
 	int bufsize = SH_TOK_BUFSIZE, position = 0;
 	char **tokens = malloc(bufsize * sizeof(char *));
